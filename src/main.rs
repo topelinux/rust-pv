@@ -18,11 +18,27 @@ fn usage(opts: Options) {
     print!("{}", opts.usage(&brief));
 }
 
-fn show_progress<T:AsRef<str>>(status: T) {
-    io::stderr().flush().unwrap();
-    eprint!("\r");
-    // TODO How to handle extra text?
-    eprint!("{:<81}", status.as_ref());
+struct pv {
+    readed: u64,
+    writed: u64,
+    bs: usize,
+}
+
+impl pv {
+    fn new(bs:usize) -> Self {
+        pv {
+            readed: 0,
+            writed: 0,
+            bs
+        }
+    }
+
+    fn show_progress<T:AsRef<str>>(&self, status: T) {
+        io::stderr().flush().unwrap();
+        eprint!("\r");
+        // TODO How to handle extra text?
+        eprint!("{:<81}", status.as_ref());
+    }
 }
 
 fn main() {
@@ -45,6 +61,7 @@ fn main() {
         None => 512,
     };
 
+    let mut pv = pv::new(bs);
     let mut dbs = BytesMut::with_capacity(bs);
 
     let mut input = stdin();
@@ -90,7 +107,7 @@ fn main() {
                         return Ok(Loop::Continue((eof, num)));
                     }
                     let str = format!("Progress ... {}", now.elapsed().as_millis());
-                    show_progress(str);
+                    pv.show_progress(str);
                     if eof {
                        // pb.finish();
                         return output.poll_flush().and_then(|_| Ok(Loop::Break((eof, num))));
