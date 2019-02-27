@@ -18,22 +18,22 @@ fn usage(opts: Options) {
     print!("{}", opts.usage(&brief));
 }
 
-struct pv {
-    readed: u64,
-    writed: u64,
+struct Pv {
+    readed: usize,
+    writed: usize,
     bs: usize,
 }
 
-impl pv {
-    fn new(bs:usize) -> Self {
-        pv {
+impl Pv {
+    fn new(bs: usize) -> Self {
+        Pv {
             readed: 0,
             writed: 0,
-            bs
+            bs,
         }
     }
 
-    fn show_progress<T:AsRef<str>>(&self, status: T) {
+    fn show_progress<T: AsRef<str>>(&self, status: T) {
         io::stderr().flush().unwrap();
         eprint!("\r");
         // TODO How to handle extra text?
@@ -61,7 +61,7 @@ fn main() {
         None => 512,
     };
 
-    let mut pv = pv::new(bs);
+    let mut pv = Pv::new(bs);
     let mut dbs = BytesMut::with_capacity(bs);
 
     let mut input = stdin();
@@ -70,13 +70,15 @@ fn main() {
     let task = lazy(move || {
         let eof = false;
         loop_fn((eof, 0), move |(mut eof, mut readed)| {
-            input.read_buf(&mut dbs)
+            input
+                .read_buf(&mut dbs)
                 .and_then(|num| {
                     let n = match num {
                         Async::Ready(n) => n,
                         _ => panic!(),
                     };
                     readed += n;
+                    pv.readed += n;
                     if n == 0 {
                         eof = true;
                     }
@@ -93,6 +95,7 @@ fn main() {
                                         panic!()
                                     } else {
                                         dbs.clear();
+                                        pv.writed += n;
                                     }
                                 }
                                 _ => panic!(),
@@ -106,11 +109,19 @@ fn main() {
                     if readed < bs && !eof {
                         return Ok(Loop::Continue((eof, num)));
                     }
-                    let str = format!("Progress ... {}", now.elapsed().as_millis());
+                    let str = format!(
+                        "Progress ... readed: {} writed: {} bs: {} elapsed: {}",
+                        pv.readed,
+                        pv.writed,
+                        pv.bs,
+                        now.elapsed().as_millis()
+                    );
                     pv.show_progress(str);
                     if eof {
-                       // pb.finish();
-                        return output.poll_flush().and_then(|_| Ok(Loop::Break((eof, num))));
+                        // pb.finish();
+                        return output
+                            .poll_flush()
+                            .and_then(|_| Ok(Loop::Break((eof, num))));
                     }
                     Ok(Loop::Continue((eof, 0)))
                 })
@@ -120,7 +131,8 @@ fn main() {
             println!("Done! use {} msec", delta);
             Ok(())
         })
-    }).map_err(|err| eprintln!("IO error: {:?}", err));
+    })
+    .map_err(|err| eprintln!("IO error: {:?}", err));
 
     tokio::run(task);
 }
