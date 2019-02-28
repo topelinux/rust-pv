@@ -19,17 +19,33 @@ fn usage(opts: Options) {
 }
 
 struct Pv {
-    readed: usize,
-    writed: usize,
     bs: usize,
+    thresh_millis: u128,
+    processed: usize,
+    millis_processed: usize,
+    millis_elapsed: u128,
 }
 
 impl Pv {
-    fn new(bs: usize) -> Self {
+    fn new(bs: usize, thresh_millis: u128) -> Self {
         Pv {
-            readed: 0,
-            writed: 0,
             bs,
+            thresh_millis,
+            processed: 0,
+            millis_processed: 0,
+            millis_elapsed: 0,
+        }
+    }
+
+    fn update_status(&mut self, processed: usize, millis_elapsed: u128) {
+        self.processed += processed;
+        self.millis_processed += processed;
+        if millis_elapsed - self.millis_elapsed >= self.thresh_millis {
+            let speed = (self.millis_processed as u128) / ((millis_elapsed - self.millis_elapsed) * 1000);
+            let status = format!("speed: {} MBytes/s", speed);
+            self.show_progress(status);
+            self.millis_elapsed = millis_elapsed;
+            self.millis_processed = 0;
         }
     }
 
@@ -61,7 +77,7 @@ fn main() {
         None => 512,
     };
 
-    let mut pv = Pv::new(bs);
+    let mut pv = Pv::new(bs, 200);
     let mut dbs = BytesMut::with_capacity(bs);
 
     let mut input = stdin();
@@ -78,7 +94,6 @@ fn main() {
                         _ => panic!(),
                     };
                     readed += n;
-                    pv.readed += n;
                     if n == 0 {
                         eof = true;
                     }
@@ -95,7 +110,6 @@ fn main() {
                                         panic!()
                                     } else {
                                         dbs.clear();
-                                        pv.writed += n;
                                     }
                                 }
                                 _ => panic!(),
@@ -106,17 +120,10 @@ fn main() {
                     Ok(num)
                 })
                 .and_then(|num| {
+                    pv.update_status(num,  now.elapsed().as_millis());
                     if readed < bs && !eof {
                         return Ok(Loop::Continue((eof, num)));
                     }
-                    let str = format!(
-                        "Progress ... readed: {} writed: {} bs: {} elapsed: {}",
-                        pv.readed,
-                        pv.writed,
-                        pv.bs,
-                        now.elapsed().as_millis()
-                    );
-                    pv.show_progress(str);
                     if eof {
                         // pb.finish();
                         return output
