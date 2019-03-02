@@ -8,10 +8,16 @@ extern crate tokio_fs;
 use bytes::BytesMut;
 use futures::future::{lazy, loop_fn, Loop};
 use getopts::Options;
-use std::{env, io, str::FromStr, time::Instant};
+use std::{env, fs, io, str::FromStr, time::Instant};
 
-use tokio::prelude::*;
-use tokio_fs::{stdin, stdout};
+use tokio::{fs::File, prelude::*};
+
+use tokio_fs::{stdin, stdout, Stdin};
+
+enum FileMode {
+    InputStdin(Stdin),
+    InputFile(File),
+}
 
 fn usage(opts: Options) {
     let brief = ("Usage: pv [options] <OUTFILE>").to_string();
@@ -21,9 +27,10 @@ fn usage(opts: Options) {
 struct Pv {
     bs: usize,
     thresh_millis: u128,
-    processed: usize,
-    millis_processed: usize,
+    processed: u64,
+    millis_processed: u64,
     millis_elapsed: u128,
+    size: u64,
 }
 
 impl Pv {
@@ -34,15 +41,29 @@ impl Pv {
             processed: 0,
             millis_processed: 0,
             millis_elapsed: 0,
+            size: 0,
         }
     }
 
-    fn update_status(&mut self, processed: usize, millis_elapsed: u128) {
+    fn set_size(&mut self, size: u64) {
+        self.size = size;
+    }
+
+    fn update_status(&mut self, processed: u64, millis_elapsed: u128) {
         self.processed += processed;
         self.millis_processed += processed;
         if millis_elapsed - self.millis_elapsed >= self.thresh_millis {
-            let speed = (self.millis_processed as u128) / ((millis_elapsed - self.millis_elapsed) * 1000);
-            let status = format!("speed: {} MBytes/s", speed);
+            let speed =
+                (self.millis_processed as u128) / ((millis_elapsed - self.millis_elapsed) * 1000);
+            let status = if self.size > 0 {
+                format!(
+                    "speed: {} MBytes/s processed: {} %",
+                    speed,
+                    100 * ((self.millis_processed + self.processed) / self.size)
+                )
+            } else {
+                format!("speed: {} MBytes/s", speed)
+            };
             self.show_progress(status);
             self.millis_elapsed = millis_elapsed;
             self.millis_processed = 0;
@@ -80,14 +101,29 @@ fn main() {
     let mut pv = Pv::new(bs, 200);
     let mut dbs = BytesMut::with_capacity(bs);
 
-    let mut input = stdin();
+    let mut input_file: FileMode = if !matches.free.is_empty() {
+        let input_path = matches.free[0].clone();
+        let metadata = fs::metadata(input_path.as_str()).unwrap();
+        if metadata.file_type().is_file() {
+            pv.set_size(metadata.len());
+        }
+        let std_file = fs::File::open(input_path.as_str()).unwrap();
+        eprintln!("input file name is {}", input_path);
+        FileMode::InputFile(File::from_std(std_file))
+    } else {
+        FileMode::InputStdin(stdin())
+    };
+
     let mut output = stdout();
     let now = Instant::now();
     let task = lazy(move || {
         let eof = false;
         loop_fn((eof, 0), move |(mut eof, mut readed)| {
-            input
-                .read_buf(&mut dbs)
+            let poll_reader = match &mut input_file {
+                FileMode::InputFile(input) => input.read_buf(&mut dbs),
+                FileMode::InputStdin(input) => input.read_buf(&mut dbs),
+            };
+            poll_reader
                 .and_then(|num| {
                     let n = match num {
                         Async::Ready(n) => n,
@@ -120,7 +156,7 @@ fn main() {
                     Ok(num)
                 })
                 .and_then(|num| {
-                    pv.update_status(num,  now.elapsed().as_millis());
+                    pv.update_status(num as u64, now.elapsed().as_millis());
                     if readed < bs && !eof {
                         return Ok(Loop::Continue((eof, num)));
                     }
@@ -135,7 +171,7 @@ fn main() {
         })
         .and_then(move |_| {
             let delta = now.elapsed().as_millis();
-            println!("Done! use {} msec", delta);
+            eprintln!("Done! use {} msec", delta);
             Ok(())
         })
     })
