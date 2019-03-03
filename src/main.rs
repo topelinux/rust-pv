@@ -62,7 +62,7 @@ impl Pv {
                     100 * ((self.millis_processed + self.processed) / self.size)
                 )
             } else {
-                format!("speed: {} MBytes/s", speed)
+                format!("speed: {} MBytes/s elapsed: {} s", speed, millis_elapsed/1000)
             };
             self.show_progress(status);
             self.millis_elapsed = millis_elapsed;
@@ -136,7 +136,7 @@ fn main() {
                     Ok(n)
                 })
                 .and_then(|num| {
-                    if readed == bs || eof {
+                    if readed == pv.bs || eof {
                         dbs.truncate(readed);
                         output
                             .poll_write(&dbs)
@@ -157,11 +157,10 @@ fn main() {
                 })
                 .and_then(|num| {
                     pv.update_status(num as u64, now.elapsed().as_millis());
-                    if readed < bs && !eof {
+                    if readed < pv.bs && !eof {
                         return Ok(Loop::Continue((eof, num)));
                     }
                     if eof {
-                        // pb.finish();
                         return output
                             .poll_flush()
                             .and_then(|_| Ok(Loop::Break((eof, num))));
