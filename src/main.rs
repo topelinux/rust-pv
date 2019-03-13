@@ -20,7 +20,7 @@ enum FileMode {
 }
 
 fn usage(opts: Options) {
-    let brief = ("Usage: pv [options] <OUTFILE>").to_string();
+    let brief = ("Usage: pv [options] <INFILE>").to_string();
     print!("{}", opts.usage(&brief));
 }
 
@@ -54,15 +54,21 @@ impl Pv {
         self.millis_processed += processed;
         if millis_elapsed - self.millis_elapsed >= self.thresh_millis {
             let speed =
-                (self.millis_processed as u128) / ((millis_elapsed - self.millis_elapsed) * 1000);
+                u128::from(self.millis_processed) / ((millis_elapsed - self.millis_elapsed) * 1000);
             let status = if self.size > 0 {
                 format!(
-                    "speed: {} MBytes/s processed: {} %",
+                    "speed: {} MBytes/s bs: {} processed: {} %",
                     speed,
+                    self.bs,
                     100 * ((self.millis_processed + self.processed) / self.size)
                 )
             } else {
-                format!("speed: {} MBytes/s elapsed: {} s", speed, millis_elapsed/1000)
+                format!(
+                    "speed: {} MBytes/s bs: {} elapsed: {} s",
+                    speed,
+                    self.bs,
+                    millis_elapsed / 1000
+                )
             };
             self.show_progress(status);
             self.millis_elapsed = millis_elapsed;
@@ -81,6 +87,12 @@ impl Pv {
 fn main() {
     let mut opts = Options::new();
     opts.optopt("b", "blocksize", "Block size in bytes", "BS");
+    opts.optopt(
+        "t",
+        "thresh_millis",
+        "Threshold mills for update process",
+        "Threshold mills",
+    );
     opts.optflag("h", "help", "print this help menu");
 
     let matches = match opts.parse(env::args().skip(1)) {
@@ -98,7 +110,11 @@ fn main() {
         None => 512,
     };
 
-    let mut pv = Pv::new(bs, 200);
+    let thresh_millis = match matches.opt_str("t") {
+        Some(v) => u128::from_str(v.as_str()).unwrap(),
+        None => 200,
+    };
+    let mut pv = Pv::new(bs, thresh_millis);
     let mut dbs = BytesMut::with_capacity(bs);
 
     let mut input_file: FileMode = if !matches.free.is_empty() {
@@ -108,7 +124,6 @@ fn main() {
             pv.set_size(metadata.len());
         }
         let std_file = fs::File::open(input_path.as_str()).unwrap();
-        eprintln!("input file name is {}", input_path);
         FileMode::InputFile(File::from_std(std_file))
     } else {
         FileMode::InputStdin(stdin())
