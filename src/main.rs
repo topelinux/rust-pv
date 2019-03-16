@@ -90,8 +90,7 @@ fn main() {
     opts.optopt(
         "t",
         "thresh_millis",
-        "Threshold mills for update process",
-        "Threshold mills",
+        "Threshold mills for update process", "Thresh"
     );
     opts.optflag("h", "help", "print this help menu");
 
